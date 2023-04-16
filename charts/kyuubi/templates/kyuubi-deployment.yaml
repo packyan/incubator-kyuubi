@@ -1,19 +1,19 @@
-#
-# Licensed to the Apache Software Foundation (ASF) under one or more
-# contributor license agreements.  See the NOTICE file distributed with
-# this work for additional information regarding copyright ownership.
-# The ASF licenses this file to You under the Apache License, Version 2.0
-# (the "License"); you may not use this file except in compliance with
-# the License.  You may obtain a copy of the License at
-#
-#    http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#
+{{/*
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements.  See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with
+  the License.  You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+*/}}
 
 apiVersion: apps/v1
 kind: Deployment
@@ -42,7 +42,9 @@ spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if or .Values.serviceAccount.name .Values.serviceAccount.create }}
       serviceAccountName: {{ .Values.serviceAccount.name | default .Release.Name }}
+      {{- end }}
       {{- with .Values.initContainers }}
       initContainers: {{- tpl (toYaml .) $ | nindent 8 }}
       {{- end }}
@@ -50,6 +52,12 @@ spec:
         - name: kyuubi-server
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.command }}
+          command: {{- tpl (toYaml .) $ | nindent 12 }}
+          {{- end }}
+          {{- with .Values.args }}
+          args: {{- tpl (toYaml .) $ | nindent 12 }}
+          {{- end }}
           {{- with .Values.env }}
           env: {{- tpl (toYaml .) $ | nindent 12 }}
           {{- end }}
@@ -57,13 +65,16 @@ spec:
           envFrom: {{- tpl (toYaml .) $ | nindent 12 }}
           {{- end }}
           ports:
-            - name: frontend-port
-              containerPort: {{ .Values.server.bind.port }}
-              protocol: TCP
+            {{- range $name, $frontend := .Values.server }}
+            {{- if $frontend.enabled }}
+            - name: {{ $name | kebabcase }}
+              containerPort: {{ $frontend.port }}
+            {{- end }}
+            {{- end }}
           {{- if .Values.probe.liveness.enabled }}
           livenessProbe:
-            tcpSocket:
-              port: {{ .Values.server.bind.port }}
+            exec:
+              command: ["/bin/bash", "-c", "bin/kyuubi status"]
             initialDelaySeconds: {{ .Values.probe.liveness.initialDelaySeconds }}
             periodSeconds: {{ .Values.probe.liveness.periodSeconds }}
             timeoutSeconds: {{ .Values.probe.liveness.timeoutSeconds }}
@@ -72,8 +83,8 @@ spec:
           {{- end }}
           {{- if .Values.probe.readiness.enabled }}
           readinessProbe:
-            tcpSocket:
-              port: {{ .Values.server.bind.port }}
+            exec:
+              command: ["/bin/bash", "-c", "$KYUUBI_HOME/bin/kyuubi status"]
             initialDelaySeconds: {{ .Values.probe.readiness.initialDelaySeconds }}
             periodSeconds: {{ .Values.probe.readiness.periodSeconds }}
             timeoutSeconds: {{ .Values.probe.readiness.timeoutSeconds }}
@@ -81,11 +92,11 @@ spec:
             successThreshold: {{ .Values.probe.readiness.successThreshold }}
           {{- end }}
           {{- with .Values.resources }}
-          resources:  {{- toYaml . | nindent 12 }}
+          resources: {{- toYaml . | nindent 12 }}
           {{- end }}
           volumeMounts:
             - name: conf
-              mountPath: {{ .Values.server.confDir }}
+              mountPath: {{ .Values.kyuubiConfDir }}
             {{- with .Values.volumeMounts }}
               {{- tpl (toYaml .) $ | nindent 12 }}
             {{- end }}

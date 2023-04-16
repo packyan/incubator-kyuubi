@@ -20,6 +20,8 @@ import overviewRoutes from './overview'
 import workloadRoutes from './workload'
 import operationRoutes from './operation'
 import contactRoutes from './contact'
+import sessionRoutes from './session'
+import engineRoutes from './engine'
 
 const routes = [
   {
@@ -36,15 +38,17 @@ const routes = [
     redirect: 'overview',
     children: [
       ...overviewRoutes,
+      ...sessionRoutes,
       ...workloadRoutes,
       ...operationRoutes,
+      ...engineRoutes,
       ...contactRoutes
     ]
   }
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory('/ui'),
   routes
 })
 

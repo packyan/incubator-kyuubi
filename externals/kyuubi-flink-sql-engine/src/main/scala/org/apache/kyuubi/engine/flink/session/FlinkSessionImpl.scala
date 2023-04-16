@@ -26,8 +26,9 @@ import org.apache.flink.table.client.gateway.local.LocalExecutor
 import org.apache.hive.service.rpc.thrift.{TGetInfoType, TGetInfoValue, TProtocolVersion}
 
 import org.apache.kyuubi.KyuubiSQLException
+import org.apache.kyuubi.config.KyuubiReservedKeys.KYUUBI_SESSION_HANDLE_KEY
 import org.apache.kyuubi.engine.flink.FlinkEngineUtils
-import org.apache.kyuubi.session.{AbstractSession, SessionManager}
+import org.apache.kyuubi.session.{AbstractSession, SessionHandle, SessionManager}
 
 class FlinkSessionImpl(
     protocol: TProtocolVersion,
@@ -38,6 +39,9 @@ class FlinkSessionImpl(
     sessionManager: SessionManager,
     val executor: LocalExecutor)
   extends AbstractSession(protocol, user, password, ipAddress, conf, sessionManager) {
+
+  override val handle: SessionHandle =
+    conf.get(KYUUBI_SESSION_HANDLE_KEY).map(SessionHandle.fromUUID).getOrElse(SessionHandle())
 
   lazy val sessionContext: SessionContext = {
     FlinkEngineUtils.getSessionContext(executor, handle.identifier.toString)
@@ -53,25 +57,34 @@ class FlinkSessionImpl(
 
   override def open(): Unit = {
     executor.openSession(handle.identifier.toString)
-    normalizedConf.foreach {
-      case ("use:catalog", catalog) =>
-        val tableEnv = sessionContext.getExecutionContext.getTableEnvironment
-        try {
-          tableEnv.useCatalog(catalog)
-        } catch {
-          case NonFatal(e) =>
+
+    val (useCatalogAndDatabaseConf, otherConf) = normalizedConf.partition { case (k, _) =>
+      Array("use:catalog", "use:database").contains(k)
+    }
+
+    useCatalogAndDatabaseConf.get("use:catalog").foreach { catalog =>
+      val tableEnv = sessionContext.getExecutionContext.getTableEnvironment
+      try {
+        tableEnv.useCatalog(catalog)
+      } catch {
+        case NonFatal(e) =>
+          throw e
+      }
+    }
+
+    useCatalogAndDatabaseConf.get("use:database").foreach { database =>
+      val tableEnv = sessionContext.getExecutionContext.getTableEnvironment
+      try {
+        tableEnv.useDatabase(database)
+      } catch {
+        case NonFatal(e) =>
+          if (database != "default") {
             throw e
-        }
-      case ("use:database", database) =>
-        val tableEnv = sessionContext.getExecutionContext.getTableEnvironment
-        try {
-          tableEnv.useDatabase(database)
-        } catch {
-          case NonFatal(e) =>
-            if (database != "default") {
-              throw e
-            }
-        }
+          }
+      }
+    }
+
+    otherConf.foreach {
       case (key, value) => setModifiableConfig(key, value)
     }
     super.open()
